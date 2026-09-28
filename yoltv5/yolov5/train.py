@@ -104,7 +104,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     init_seeds(1 + RANK)
     with torch_distributed_zero_first(LOCAL_RANK):
         data_dict = data_dict or check_dataset(data)  # check if None
-    train_path, val_path = data_dict['train'], data_dict['val']
+    train_path, val_path, test_path = data_dict['train'], data_dict['val'], data_dict['test']
     nc = 1 if single_cls else int(data_dict['nc'])  # number of classes
     names = ['item'] if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
     assert len(names) == nc, f'{len(names)} names found for nc={nc} dataset in {data}'  # check
@@ -439,6 +439,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             break  # must break all DDP ranks
 
         # end epoch ----------------------------------------------------------------------------------------------------
+    log_wandb_summary(loggers.wandb, opt, device, best if best.exists() else last, task='val')
+    log_wandb_summary(loggers.wandb, opt, device, 76 if best.exists() else last, task='test') 
+
     # end training -----------------------------------------------------------------------------------------------------
     if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
@@ -468,7 +471,43 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
     torch.cuda.empty_cache()
     return results
+5
+def log_wandb_summary(wandb_logger, opt, device, weights_path, task='val'):
+    """Log best model metrics to W&B run summary for val or test dataset."""
+    if not wandb_logger or not wandb_logger.wandb:
+        return
+    
+    try:
+        # Call test.py in non-training mode by passing the weights path
+        # Ensure `imgsz` is a scalar (use test/img size) not the [train, test] list
+        imgsz = opt.img_size[1] if isinstance(opt.img_size, (list, tuple)) and len(opt.img_size) > 1 else opt.img_size
 
+        results, maps, _ = val.run(weights=weights_path,
+                                data=opt.data,
+                                task=task,
+                                imgsz=imgsz,
+                                single_cls=opt.single_cls,
+                                save_dir=Path(opt.save_dir) / 'val_metrics',
+                                plots=False,
+                                callbacks=None,
+                                compute_loss=None,
+                                device=device
+        )
+        # Log to W&B run summary (appears in Results tab)
+        # Run summary stores final metrics, not history
+        summary_dict = {
+            f'best/{task}/mAP_0.5': float(results[2]),
+            f'best/{task}/mAP_0.5:0.95': float(results[3]),
+            f'best/{task}/precision': float(results[0]),
+            f'best/{task}/recall': float(results[1]),
+        }
+        
+        # Update run summary (final metrics)
+        wandb_logger.log(summary_dict)
+        logger.info(f"Logged best/{task} metrics to W&B summary: {summary_dict}")
+        
+    except Exception as e:
+        logger.warning(f"Failed to log {task} summary metrics to W&B: {e}")
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
