@@ -542,6 +542,9 @@ def get_global_coords(row,
         bounds = [xmin, xmax, ymin, ymax]
         coords = [[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]]
     """
+    # If max_edge_aspect_ratio is None make it 2.5
+    if max_edge_aspect_ratio is None:
+        max_edge_aspect_ratio = 2.5
 
     xmin0, xmax0 = row['Xmin'], row['Xmax']
     ymin0, ymax0 = row['Ymin'], row['Ymax']
@@ -578,9 +581,15 @@ def get_global_coords(row,
                 return [], []
     
     # skip high aspect ratios
-    if (1.*dx/dy > max_edge_aspect_ratio) \
-            or (1.*dy/dx > max_edge_aspect_ratio):
+    try:
+         if (1.*dx/dy > max_edge_aspect_ratio) or (1.*dy/dx > max_edge_aspect_ratio):
+            return [], []
+    except:
+        print("Error computing aspect ratio, skipping row:", row)
+        print("dx, dy:", dx, dy)
+        print("max_edge_aspect_ratio:", max_edge_aspect_ratio)
         return [], []
+         
 
     # set min, max x and y for each box, shifted for appropriate
     #   padding
@@ -835,6 +844,9 @@ def refine_df(df, groupby='Image_Path',
         Updated dataframe low confidence detections filtered out and NMS
         applied.
     """
+
+    if nms_overlap_thresh is None:
+        nms_overlap_thresh = 0.5
 
     print("Running refine_df()...")
     t0 = time.time()
@@ -1549,8 +1561,8 @@ def execute(pred_dir='/root/yoltv5/results/',
             gdf_geo.to_file(outfile_geojson_geo_orig_crs, driver='GeoJSON')
             # convert geojson to 'EPSG:3857'
             # https://geopandas.org/en/stable/docs/user_guide/projections.html
-            gdf_geo_3857 = gdf_geo.to_crs('EPSG:3857')
-            gdf_geo_3857.to_file(outfile_geojson_geo_3857, driver='GeoJSON')
+            # gdf_geo_3857 = gdf_geo.to_crs('EPSG:3857')
+            # gdf_geo_3857.to_file(outfile_geojson_geo_3857, driver='GeoJSON')
 
         # # wmp too... poop
         # use convert_poly_coords - need affine trannsorm to: outProj_str='EPSG:3857'
